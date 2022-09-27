@@ -58,6 +58,11 @@ defmodule PuzzleTracker.Crossword.PuzzleAttemptTest do
     test "fails when conceding with no incomplete squares", %{attempt: attempt} do
       assert {:error, :no_incomplete} = PuzzleAttempt.concede(attempt, 0)
     end
+
+    test "fails when test is already finished", %{attempt: attempt} do
+      {:ok, attempt} = PuzzleAttempt.complete(attempt)
+      assert {:error, :already_finished} = PuzzleAttempt.complete(attempt)
+    end
   end
 
   describe "Scoring a puzzle" do
@@ -156,10 +161,13 @@ defmodule PuzzleTracker.Crossword.PuzzleAttemptTest do
 
       puzzle = build_puzzle()
       attempt = PuzzleAttempt.new(puzzle)
+
+      paused = PuzzleAttempt.pause(attempt, thirty_minutes_from_now)
+
       {:ok, completed} = PuzzleAttempt.complete(attempt, future_time)
       {:ok, conceded} = PuzzleAttempt.concede(attempt, 1, future_time)
 
-      {:ok, with_pauses} =
+      {:ok, completed_with_pauses} =
         attempt
         |> PuzzleAttempt.pause(thirty_minutes_from_now)
         |> PuzzleAttempt.resume(forty_five_minutes_from_now)
@@ -169,9 +177,10 @@ defmodule PuzzleTracker.Crossword.PuzzleAttemptTest do
 
       %{
         in_progress: attempt,
+        paused: paused,
         completed: completed,
         conceded: conceded,
-        with_pauses: with_pauses,
+        completed_with_pauses: completed_with_pauses,
         future_time: future_time,
         one_hour_from_now: one_hour_from_now,
         forty_five_minutes_from_now: forty_five_minutes_from_now,
@@ -203,6 +212,14 @@ defmodule PuzzleTracker.Crossword.PuzzleAttemptTest do
       assert PuzzleAttempt.paused_time(attempt, forty_five_minutes_from_now) > 0
     end
 
+    test "treats pausing a paused test is a noop", %{paused: attempt} do
+      assert PuzzleAttempt.pause(attempt) == attempt
+    end
+
+    test "treats resuming a non-paused test is a noop", %{in_progress: attempt} do
+      assert PuzzleAttempt.resume(attempt) == attempt
+    end
+
     test "measures paused time as 0 when not paused", %{
       in_progress: attempt,
       future_time: future_time
@@ -211,16 +228,12 @@ defmodule PuzzleTracker.Crossword.PuzzleAttemptTest do
     end
 
     test "measures total paused time", %{
-      in_progress: attempt,
-      thirty_minutes_from_now: thirty_minutes_from_now,
+      paused: attempt,
       forty_five_minutes_from_now: forty_five_minutes_from_now,
       one_hour_from_now: one_hour_from_now,
       future_time: future_time
     } do
-      first_pause_attempt =
-        attempt
-        |> PuzzleAttempt.pause(thirty_minutes_from_now)
-        |> PuzzleAttempt.resume(forty_five_minutes_from_now)
+      first_pause_attempt = PuzzleAttempt.resume(attempt, forty_five_minutes_from_now)
 
       second_pause_attempt_paused =
         first_pause_attempt
@@ -228,7 +241,7 @@ defmodule PuzzleTracker.Crossword.PuzzleAttemptTest do
         |> PuzzleAttempt.resume(future_time)
 
       second_pause_attempt_resumed =
-        first_pause_attempt
+        second_pause_attempt_paused
         |> PuzzleAttempt.pause(one_hour_from_now)
         |> PuzzleAttempt.resume(future_time)
 
@@ -243,7 +256,7 @@ defmodule PuzzleTracker.Crossword.PuzzleAttemptTest do
 
     test "includes paused time in total time", %{
       completed: without_pauses,
-      with_pauses: with_pauses,
+      completed_with_pauses: with_pauses,
       future_time: future_time
     } do
       assert PuzzleAttempt.total_time(without_pauses, future_time) > 0
@@ -253,7 +266,7 @@ defmodule PuzzleTracker.Crossword.PuzzleAttemptTest do
     end
 
     test "doe not include paused time in total time spent", %{
-      with_pauses: attempt,
+      completed_with_pauses: attempt,
       future_time: future_time
     } do
       total_time_spent = PuzzleAttempt.total_time_spent(attempt, future_time)
